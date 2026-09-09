@@ -10,6 +10,8 @@ Features:
 
 Data is stored locally in `data/flights.json`. MongoDB support can be added later.
 
+![Map](docs/map-screenshot.jpg)
+
 ## Setup
 
 Tested with Node.js 18+.
@@ -26,13 +28,13 @@ This installs Express, the only dependency.
 
 ### 2. Configure the project
 
-Configuration lives in `default.config`. Copy it to `config` if you want to override any values without touching the defaults:
+Configuration uses two files: `default.config` (committed, provides defaults) and `config` (gitignored, required, overrides defaults). Copy the default to get started:
 
 ```
 cp default.config config
 ```
 
-If no `config` file is present, `default.config` is used. The config parameters are:
+The app will not start if `config` is missing or contains invalid JSON. The config parameters are:
 
 * `port`: port the server listens on (default: `3000`).
 * `data_dir`: directory used for runtime data files (default: `data`). Gitignored.
@@ -67,6 +69,25 @@ The flight lookup feature (add flight by number + date) uses the [AeroDataBox AP
 3. Copy your `X-RapidAPI-Key` from the API console into `secret`
 
 Flight lookup is optional — if no key is configured, you can still add flights by filling in the details manually.
+
+#### TripIt import (past and future flights)
+
+The **↓ TripIt** button in the nav bar imports all your flights (past and future) directly from TripIt via OAuth. To enable it:
+
+1. Register a developer app at [tripit.com/developer](https://www.tripit.com/developer)
+2. Copy the Consumer Key and Consumer Secret into `secret`:
+
+```json
+{
+  "tripit_client_key": "YOUR_CLIENT_KEY",
+  "tripit_client_secret": "YOUR_CLIENT_SECRET"
+}
+```
+
+3. Restart the server — the **↓ TripIt** button will appear in the nav bar
+4. Click it and authorise in TripIt — you will be redirected back with a count of newly imported flights
+
+Existing flights (matched by date + route + flight number) are not duplicated. Upcoming flights are imported as-is.
 
 ## Running
 

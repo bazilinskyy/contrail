@@ -8,14 +8,27 @@ const https = require('https');
 
 // --- Config & Secret ---
 
-const config = JSON.parse(fs.readFileSync(path.join(__dirname, 'default.config'), 'utf8'));
-
-let secret = { rapidapi_key: '' };
-try {
-  secret = JSON.parse(fs.readFileSync(path.join(__dirname, 'secret'), 'utf8'));
-} catch (_) {
-  console.log('[warn] No secret file found — flight lookup disabled. Copy default.secret to secret and add your RapidAPI key.');
+function loadJSON(filePath, label) {
+  let raw;
+  try {
+    raw = fs.readFileSync(filePath, 'utf8');
+  } catch (_) {
+    console.error(`[error] ${label} not found: ${filePath}`);
+    process.exit(1);
+  }
+  try {
+    return JSON.parse(raw);
+  } catch (e) {
+    console.error(`[error] ${label} is not valid JSON: ${e.message}`);
+    process.exit(1);
+  }
 }
+
+const defaults = loadJSON(path.join(__dirname, 'default.config'), 'default.config');
+const overrides = loadJSON(path.join(__dirname, 'config'), 'config');
+const config = { ...defaults, ...overrides };
+
+const secret = loadJSON(path.join(__dirname, 'secret'), 'secret');
 
 const DATA_DIR      = path.join(__dirname, config.data_dir);
 const AIRPORTS_FILE = path.join(__dirname, config.airports_file);
@@ -41,6 +54,7 @@ function httpsGet(url) {
     }).on('error', reject);
   });
 }
+
 
 function parseCSVLine(line) {
   const fields = [];
@@ -90,7 +104,8 @@ function parseFlightsCSV(csv) {
       to:            obj['to'] || '',
       flight_number: obj['flight_number'] || '',
       airline:       obj['airline'] || '',
-      distance:      parseInt(obj['distance']) || 0,
+      // openflights CSV exports distance in statute miles; convert to km
+      distance:      Math.round((parseInt(obj['distance']) || 0) * 1.60934),
       duration:      obj['duration'] || '',
       seat:          obj['seat'] || '',
       seat_type:     obj['seat_type'] || '',
@@ -231,7 +246,7 @@ async function init() {
 // --- Express ---
 
 const app = express();
-app.use(express.json());
+app.use(express.json({ limit: '10mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 
 app.get('/api/flights', (_req, res) => {
@@ -270,11 +285,86 @@ app.post('/api/flights', (req, res) => {
   res.json(f);
 });
 
+// --- TripIt iCal import ---
+
+function parseTripItIcal(text) {
+  const segments = [];
+  const unfolded = text.replace(/\r?\n[ \t]/g, ''); // unfold continuation lines
+  const blocks = unfolded.split(/BEGIN:VEVENT/);
+  for (const block of blocks.slice(1)) {
+    const field = key => {
+      const m = block.match(new RegExp(`^${key}(?:;[^:]*)?:(.+)$`, 'm'));
+      return m ? m[1].trim() : '';
+    };
+    const summary = field('SUMMARY');
+    const dtstart = field('DTSTART');
+    const dtend   = field('DTEND');
+
+    // Extract IATA codes: "... (AMS) to ... (LHR)"
+    const iata = summary.match(/\(([A-Z]{3})\)\s+to\s+[^(]+\(([A-Z]{3})\)/);
+    if (!iata) continue;
+    const [, from, to] = iata;
+
+    const dateM = dtstart.match(/^(\d{4})(\d{2})(\d{2})/);
+    if (!dateM) continue;
+    const date = `${dateM[1]}-${dateM[2]}-${dateM[3]}`;
+
+    const fnM = summary.match(/^([A-Z]{2,3})\s*(\d{1,4})\b/);
+    const flight_number = fnM ? `${fnM[1]}${fnM[2]}` : '';
+
+    let duration = '';
+    const s = dtstart.match(/T(\d{2})(\d{2})(\d{2})/);
+    const e = dtend.match(/(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})/);
+    const d = dtstart.match(/(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})/);
+    if (d && e) {
+      const dep = new Date(`${d[1]}-${d[2]}-${d[3]}T${d[4]}:${d[5]}:${d[6]}Z`);
+      const arr = new Date(`${e[1]}-${e[2]}-${e[3]}T${e[4]}:${e[5]}:${e[6]}Z`);
+      const m = Math.round((arr - dep) / 60000);
+      if (m > 0) duration = `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+    }
+
+    segments.push({ date, from, to, flight_number, duration });
+  }
+  return segments;
+}
+
+app.get('/api/tripit/import-ical', async (req, res) => {
+  const { url } = req.query;
+  if (!url || !url.startsWith('https://') || !url.includes('tripit.com')) {
+    return res.status(400).json({ error: 'Provide a valid tripit.com iCal URL' });
+  }
+  let ical;
+  try { ical = await httpsGet(url); } catch (e) { return res.status(502).json({ error: `Fetch failed: ${e.message}` }); }
+
+  const segments = parseTripItIcal(ical);
+  let imported = 0;
+  for (const { date, from, to, flight_number, duration } of segments) {
+    if (!from || !to || !date) continue;
+    if (flights.some(f => f.date === date && f.from === from && f.to === to && f.flight_number === flight_number)) continue;
+    const distance = (airports[from] && airports[to]) ? haversine(airports[from].lat, airports[from].lon, airports[to].lat, airports[to].lon) : 0;
+    flights.push({ id: nextId(), date, from, to, flight_number, airline: '', distance, duration, seat: '', seat_type: '', class: '', plane: '', reason: '', registration: '', trip: '', note: '' });
+    imported++;
+  }
+  if (imported > 0) {
+    flights.sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+    saveFlights();
+  }
+  res.json({ imported, total: segments.length });
+});
+
 // --- Start ---
 
 init().then(() => {
-  app.listen(config.port, () => {
-    console.log(`OpenFlights running at http://localhost:${config.port}`);
+  const server = app.listen(config.port, () => {
+    console.log(`Contrail running at http://localhost:${config.port}`);
+  });
+  server.on('error', e => {
+    if (e.code === 'EADDRINUSE') {
+      console.error(`[error] Port ${config.port} is already in use. Stop the other process or change port in config.`);
+    } else {
+      console.error('[error]', e.message);
+    }
+    process.exit(1);
   });
 }).catch(e => {
   console.error('[fatal]', e);
