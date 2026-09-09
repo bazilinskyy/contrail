@@ -368,8 +368,13 @@
 <div class="modal-backdrop" id="tripit-modal" onclick="if(event.target===this)closeTripItModal()">
   <div class="modal">
     <h3>↓ Import from TripIt</h3>
-    <p>Paste your TripIt private calendar URL. Find it at:<br>
-    <b>tripit.com → Profile → Account → Email &amp; Calendar → Subscribe to your travel schedule</b></p>
+    <div id="tripit-oauth-section" hidden>
+      <button class="btn btn-primary" style="width:100%;margin-bottom:16px" onclick="window.location='/auth/tripit'">Authorise with TripIt →</button>
+      <p style="text-align:center;margin-bottom:12px;color:var(--text2);font-size:12px">— or —</p>
+    </div>
+    <p id="tripit-ical-intro">Paste your private TripIt calendar URL — find it at:<br>
+    <b>tripit.com → Profile → Account → Email &amp; Calendar → Subscribe to your travel schedule</b><br><br>
+    <span id="tripit-oauth-hint" style="font-size:12px">For richer data (seat, class, aircraft), add <code>tripit_client_key</code> and <code>tripit_client_secret</code> to your <code>secret</code> file.</span></p>
     <input type="url" id="tripit-ical-url" placeholder="https://www.tripit.com/feed/ical/private/...">
     <div class="modal-actions">
       <button class="btn btn-ghost" onclick="closeTripItModal()">Cancel</button>
@@ -388,9 +393,9 @@ let sortCol = 'date', sortDir = -1; // -1 = desc
 
 // --- Tabs ---
 
-document.querySelectorAll('.tab').forEach(btn => {
+document.querySelectorAll('.tab[data-tab]').forEach(btn => {
   btn.addEventListener('click', () => {
-    document.querySelectorAll('.tab').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.tab[data-tab]').forEach(b => b.classList.remove('active'));
     document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
     btn.classList.add('active');
     document.getElementById('tab-' + btn.dataset.tab).classList.add('active');
@@ -400,12 +405,27 @@ document.querySelectorAll('.tab').forEach(btn => {
 
 // --- TripIt iCal ---
 
+fetch('/api/tripit/oauth-configured').then(r => r.json()).then(d => {
+  if (d.configured) {
+    document.getElementById('tripit-oauth-section').hidden = false;
+    document.getElementById('tripit-oauth-hint').hidden = true;
+  }
+});
+
+const _tp = new URLSearchParams(location.search);
+if (_tp.get('tripit') === 'ok') {
+  history.replaceState({}, '', '/');
+  const n = parseInt(_tp.get('imported') || '0');
+  setTimeout(() => toast(n > 0 ? `TripIt: imported ${n} new flight${n !== 1 ? 's' : ''}` : 'TripIt: no new flights to import'), 400);
+}
+
 function openTripItModal() {
   document.getElementById('tripit-modal').classList.add('open');
   setTimeout(() => document.getElementById('tripit-ical-url').focus(), 50);
 }
 function closeTripItModal() {
   document.getElementById('tripit-modal').classList.remove('open');
+  if (map) setTimeout(() => map.invalidateSize(), 50);
 }
 async function doTripItImport() {
   const url = document.getElementById('tripit-ical-url').value.trim();

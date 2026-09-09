@@ -5,6 +5,7 @@ const express = require('express');
 const fs = require('fs');
 const path = require('path');
 const https = require('https');
+const { randomBytes, createHmac } = require('crypto');
 
 // --- Config & Secret ---
 
@@ -350,6 +351,107 @@ app.get('/api/tripit/import-ical', async (req, res) => {
     saveFlights();
   }
   res.json({ imported, total: segments.length });
+});
+
+// --- TripIt OAuth 1.0a (optional — requires tripit_client_key + tripit_client_secret in secret) ---
+
+const pendingTokens = new Map();
+
+function oauthSign(method, url, params, cs, ts = '') {
+  const base = Object.keys(params).sort().map(k => `${encodeURIComponent(k)}=${encodeURIComponent(params[k])}`).join('&');
+  const sigBase = `${method.toUpperCase()}&${encodeURIComponent(url)}&${encodeURIComponent(base)}`;
+  return createHmac('sha1', `${encodeURIComponent(cs)}&${encodeURIComponent(ts)}`).update(sigBase).digest('base64');
+}
+
+function oauthHeader(method, url, extra, ck, cs, tk = '', ts = '') {
+  const p = { oauth_consumer_key: ck, oauth_nonce: randomBytes(16).toString('hex'), oauth_signature_method: 'HMAC-SHA1', oauth_timestamp: String(Math.floor(Date.now() / 1000)), oauth_version: '1.0', ...extra };
+  if (tk) p.oauth_token = tk;
+  p.oauth_signature = oauthSign(method, url, p, cs, ts);
+  return 'OAuth ' + Object.keys(p).map(k => `${encodeURIComponent(k)}="${encodeURIComponent(p[k])}"`).join(', ');
+}
+
+function httpsPost(url, authHeader) {
+  return new Promise((resolve, reject) => {
+    const u = new URL(url);
+    const req = https.request({ hostname: u.hostname, path: u.pathname, method: 'POST', headers: { Authorization: authHeader, 'Content-Type': 'application/x-www-form-urlencoded', 'Content-Length': 0 } }, res => {
+      let data = ''; res.on('data', c => data += c); res.on('end', () => resolve({ status: res.statusCode, body: data }));
+    });
+    req.on('error', reject); req.end();
+  });
+}
+
+app.get('/api/tripit/oauth-configured', (_req, res) => {
+  res.json({ configured: !!(secret.tripit_client_key && secret.tripit_client_secret) });
+});
+
+app.get('/auth/tripit', async (_req, res) => {
+  const ck = secret.tripit_client_key, cs = secret.tripit_client_secret;
+  if (!ck || !cs) return res.status(503).send('TripIt OAuth not configured.');
+  const cbUrl = `http://localhost:${config.port}/auth/tripit/callback`;
+  const reqUrl = 'https://api.tripit.com/oauth/request_token';
+  try {
+    const { status, body } = await httpsPost(reqUrl, oauthHeader('POST', reqUrl, { oauth_callback: cbUrl }, ck, cs));
+    if (status !== 200) return res.status(502).send(`TripIt error (${status}): ${body}`);
+    const p = Object.fromEntries(new URLSearchParams(body));
+    pendingTokens.set(p.oauth_token, p.oauth_token_secret);
+    res.redirect(`https://www.tripit.com/oauth/authorize?oauth_token=${p.oauth_token}`);
+  } catch (e) { res.status(500).send(`OAuth error: ${e.message}`); }
+});
+
+app.get('/auth/tripit/callback', async (req, res) => {
+  const { oauth_token, oauth_verifier } = req.query;
+  const reqSecret = pendingTokens.get(oauth_token);
+  pendingTokens.delete(oauth_token);
+  if (!reqSecret) return res.status(400).send('OAuth session expired — please try again.');
+  const ck = secret.tripit_client_key, cs = secret.tripit_client_secret;
+  const accUrl = 'https://api.tripit.com/oauth/access_token';
+  try {
+    const { status, body } = await httpsPost(accUrl, oauthHeader('POST', accUrl, { oauth_verifier }, ck, cs, oauth_token, reqSecret));
+    if (status !== 200) return res.status(502).send(`TripIt token error (${status}): ${body}`);
+    const acc = Object.fromEntries(new URLSearchParams(body));
+
+    const apiUrl  = 'https://api.tripit.com/v1/list/object/type/air/format/json';
+    const apiAuth = oauthHeader('GET', apiUrl, {}, ck, cs, acc.oauth_token, acc.oauth_token_secret);
+    const apiData = await httpsGet(apiUrl + '?format=json', apiAuth);
+    // httpsGet doesn't support headers; fetch via https.request
+    const apiResult = await new Promise((resolve, reject) => {
+      https.get({ hostname: 'api.tripit.com', path: '/v1/list/object/type/air/format/json', headers: { Authorization: apiAuth } }, r => {
+        let d = ''; r.on('data', c => d += c); r.on('end', () => resolve({ status: r.statusCode, body: d }));
+      }).on('error', reject);
+    });
+    if (apiResult.status !== 200) return res.status(502).send(`TripIt API error (${apiResult.status}): ${apiResult.body}`);
+
+    const toArr = v => !v ? [] : Array.isArray(v) ? v : [v];
+    const CLASS_MAP = { Economy: 'Y', PremiumEconomy: 'W', Business: 'C', BusinessClass: 'C', First: 'F', FirstClass: 'F' };
+    const SEAT_MAP  = { Window: 'window', Aisle: 'aisle', Middle: 'middle' };
+    const data = JSON.parse(apiResult.body);
+    let imported = 0;
+    for (const airObj of toArr(data.AirObject)) {
+      for (const seg of toArr(airObj.AirSegment)) {
+        const startDate = seg.StartDateTime?.date || seg.start_date || '';
+        const startTime = seg.StartDateTime?.time || seg.start_time || '';
+        const endDate   = seg.EndDateTime?.date   || seg.end_date   || '';
+        const endTime   = seg.EndDateTime?.time   || seg.end_time   || '';
+        const from = (seg.start_airport_code || '').toUpperCase();
+        const to   = (seg.end_airport_code   || '').toUpperCase();
+        const fn   = `${seg.marketing_airline_code || ''}${seg.marketing_flight_number || ''}`.trim();
+        if (!from || !to || !startDate) continue;
+        if (flights.some(f => f.date === startDate && f.from === from && f.to === to && f.flight_number === fn)) continue;
+        let duration = '';
+        try {
+          const dep = new Date(`${startDate}T${startTime || '00:00'}:00`), arr = new Date(`${endDate}T${endTime || '00:00'}:00`);
+          const m = Math.round((arr - dep) / 60000);
+          if (m > 0) duration = `${String(Math.floor(m/60)).padStart(2,'0')}:${String(m%60).padStart(2,'0')}`;
+        } catch (_) {}
+        const distance = (airports[from] && airports[to]) ? haversine(airports[from].lat, airports[from].lon, airports[to].lat, airports[to].lon) : 0;
+        const seat = toArr(seg.Seats?.Seat)[0];
+        flights.push({ id: nextId(), date: startDate, from, to, flight_number: fn, airline: seg.marketing_airline || '', distance, duration, seat: seat?.seat_assignment || '', seat_type: SEAT_MAP[seat?.seat_section] || '', class: CLASS_MAP[seg.service_class] || '', plane: seg.aircraft_display_name || '', reason: '', registration: '', trip: '', note: '' });
+        imported++;
+      }
+    }
+    if (imported > 0) { flights.sort((a, b) => (b.date || '').localeCompare(a.date || '')); saveFlights(); }
+    res.redirect(`/?tripit=ok&imported=${imported}`);
+  } catch (e) { res.status(500).send(`Import error: ${e.message}`); }
 });
 
 // --- Start ---

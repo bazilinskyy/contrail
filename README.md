@@ -72,10 +72,20 @@ Flight lookup is optional — if no key is configured, you can still add flights
 
 #### TripIt import (past and future flights)
 
-The **↓ TripIt** button in the nav bar imports all your flights (past and future) directly from TripIt via OAuth. To enable it:
+Click the **↓ TripIt** button in the nav bar. Two methods are supported:
+
+**Method 1 — Calendar URL (no credentials required)**
+
+1. Go to tripit.com → Profile → Account → Email & Calendar
+2. Copy the link under *Subscribe to your travel schedule*
+3. Paste it into the import dialog and click **Import**
+
+**Method 2 — OAuth (one-time setup, more complete data)**
+
+Imports directly via the TripIt API and includes cabin class, seat, and aircraft type.
 
 1. Register a developer app at [tripit.com/developer](https://www.tripit.com/developer)
-2. Copy the Consumer Key and Consumer Secret into `secret`:
+2. Add the Consumer Key and Consumer Secret to `secret`:
 
 ```json
 {
@@ -84,10 +94,10 @@ The **↓ TripIt** button in the nav bar imports all your flights (past and futu
 }
 ```
 
-3. Restart the server — the **↓ TripIt** button will appear in the nav bar
-4. Click it and authorise in TripIt — you will be redirected back with a count of newly imported flights
+3. Restart the server — an **Authorise with TripIt** button appears at the top of the import dialog
+4. Click it, approve access in TripIt, and you are redirected back with an import count
 
-Existing flights (matched by date + route + flight number) are not duplicated. Upcoming flights are imported as-is.
+Existing flights (matched by date + route + flight number) are never duplicated.
 
 ## Running
 
