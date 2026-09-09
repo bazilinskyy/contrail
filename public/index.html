@@ -1,0 +1,695 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Contrail</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:       #0d0d1a;
+      --surface:  #13132b;
+      --surface2: #1a1a3a;
+      --border:   rgba(100,120,255,0.15);
+      --accent:   #4fc3f7;
+      --accent2:  #7c4dff;
+      --text:     #e0e0f0;
+      --text2:    #8888aa;
+      --nav-h:    52px;
+    }
+
+    html, body { height: 100%; background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; font-size: 14px; }
+
+    /* --- Nav --- */
+    nav {
+      position: fixed; top: 0; left: 0; right: 0; height: var(--nav-h);
+      background: var(--surface); border-bottom: 1px solid var(--border);
+      display: flex; align-items: center; padding: 0 20px; gap: 16px; z-index: 1000;
+    }
+    .logo { font-size: 16px; font-weight: 700; color: var(--accent); letter-spacing: 0.5px; white-space: nowrap; }
+    .logo span { opacity: 0.5; font-weight: 400; }
+    .tabs { display: flex; gap: 4px; margin-left: 16px; }
+    .tab {
+      background: none; border: none; color: var(--text2); cursor: pointer;
+      padding: 6px 14px; border-radius: 6px; font-size: 13px; font-weight: 500; transition: all .15s;
+    }
+    .tab:hover { color: var(--text); background: var(--surface2); }
+    .tab.active { color: var(--accent); background: rgba(79,195,247,0.1); }
+    .tab-add { color: var(--accent) !important; border: 1px solid rgba(79,195,247,0.3) !important; margin-left: 8px; }
+    .tab-add:hover { background: rgba(79,195,247,0.15) !important; }
+
+    /* --- Content --- */
+    main { padding-top: var(--nav-h); height: 100vh; }
+    .tab-content { display: none; height: calc(100vh - var(--nav-h)); overflow-y: auto; }
+    .tab-content.active { display: flex; flex-direction: column; }
+
+    /* --- Map --- */
+    #map { flex: 1; }
+    .leaflet-container { background: #1a1a2e !important; }
+    .leaflet-tile-pane { filter: invert(1) hue-rotate(180deg) brightness(0.85) saturate(0.6); }
+    /* Re-invert controls and popups so they stay readable */
+    .leaflet-control, .leaflet-popup-content-wrapper, .map-tooltip { filter: invert(1) hue-rotate(180deg); }
+
+    /* --- Stats --- */
+    .stats-page { padding: 28px; max-width: 1100px; margin: 0 auto; width: 100%; }
+    .stat-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 14px; margin-bottom: 32px; }
+    .stat-card {
+      background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+      padding: 18px 20px;
+    }
+    .stat-card .label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.8px; color: var(--text2); margin-bottom: 8px; }
+    .stat-card .value { font-size: 26px; font-weight: 700; color: var(--accent); line-height: 1; }
+    .stat-card .sub { font-size: 11px; color: var(--text2); margin-top: 4px; }
+
+    .chart-section { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 24px; margin-bottom: 24px; }
+    .chart-section h3 { font-size: 13px; font-weight: 600; color: var(--text2); text-transform: uppercase; letter-spacing: 0.6px; margin-bottom: 18px; }
+    .chart-wrap { height: 240px; position: relative; }
+
+    .top-lists { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+    .top-list { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 20px; }
+    .top-list h3 { font-size: 13px; font-weight: 600; color: var(--text2); text-transform: uppercase; letter-spacing: 0.6px; margin-bottom: 14px; }
+    .top-list-row { display: flex; align-items: center; justify-content: space-between; padding: 7px 0; border-bottom: 1px solid var(--border); }
+    .top-list-row:last-child { border-bottom: none; }
+    .top-list-row .rank { color: var(--text2); font-size: 12px; width: 20px; }
+    .top-list-row .name { flex: 1; padding: 0 8px; }
+    .top-list-row .count { color: var(--accent); font-weight: 600; font-size: 13px; }
+
+    /* --- Flights table --- */
+    .flights-page { padding: 20px 28px; width: 100%; }
+    .flights-header { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
+    .flights-header h2 { font-size: 16px; font-weight: 600; }
+    .flight-count { font-size: 13px; color: var(--text2); }
+    .search-box {
+      margin-left: auto; background: var(--surface); border: 1px solid var(--border);
+      border-radius: 6px; padding: 7px 12px; color: var(--text); font-size: 13px; width: 220px;
+    }
+    .search-box:focus { outline: none; border-color: var(--accent); }
+    .search-box::placeholder { color: var(--text2); }
+
+    .table-wrap { overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    thead th {
+      text-align: left; padding: 9px 12px; font-size: 11px; text-transform: uppercase;
+      letter-spacing: 0.6px; color: var(--text2); border-bottom: 1px solid var(--border);
+      cursor: pointer; white-space: nowrap; user-select: none;
+    }
+    thead th:hover { color: var(--text); }
+    thead th.sort-asc::after  { content: ' ▲'; color: var(--accent); }
+    thead th.sort-desc::after { content: ' ▼'; color: var(--accent); }
+    tbody tr { border-bottom: 1px solid var(--border); transition: background .1s; }
+    tbody tr:hover { background: var(--surface); }
+    tbody td { padding: 8px 12px; color: var(--text); }
+    tbody td.dim { color: var(--text2); }
+    .airport-code { font-weight: 700; color: var(--accent); }
+    .arrow { color: var(--text2); margin: 0 4px; }
+
+    /* --- Add flight --- */
+    .add-page { padding: 36px 28px; max-width: 600px; margin: 0 auto; width: 100%; }
+    .add-page h2 { font-size: 18px; font-weight: 600; margin-bottom: 6px; }
+    .add-page .subtitle { color: var(--text2); margin-bottom: 28px; font-size: 13px; }
+
+    .form-step { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 24px; margin-bottom: 16px; }
+    .form-step h3 { font-size: 12px; text-transform: uppercase; letter-spacing: 0.7px; color: var(--text2); margin-bottom: 18px; }
+    .form-row { display: flex; gap: 12px; margin-bottom: 14px; }
+    .form-row:last-child { margin-bottom: 0; }
+    .form-group { display: flex; flex-direction: column; flex: 1; }
+    .form-group label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.6px; color: var(--text2); margin-bottom: 6px; }
+    .form-group input {
+      background: var(--surface2); border: 1px solid var(--border); border-radius: 6px;
+      padding: 9px 12px; color: var(--text); font-size: 14px;
+    }
+    .form-group input:focus { outline: none; border-color: var(--accent); }
+    .form-group input::placeholder { color: var(--text2); opacity: 0.6; }
+    .form-group input.readonly { opacity: 0.7; cursor: default; }
+
+    .lookup-status { font-size: 13px; color: var(--text2); margin: 14px 0 0; min-height: 20px; }
+    .lookup-status.success { color: #4caf50; }
+    .lookup-status.error   { color: #ef5350; }
+
+    .btn {
+      padding: 10px 22px; border-radius: 7px; border: none; cursor: pointer;
+      font-size: 14px; font-weight: 600; transition: all .15s;
+    }
+    .btn-primary { background: var(--accent); color: #0d0d1a; }
+    .btn-primary:hover { background: #81d4fa; }
+    .btn-primary:disabled { opacity: 0.4; cursor: not-allowed; }
+    .btn-ghost { background: transparent; border: 1px solid var(--border); color: var(--text2); }
+    .btn-ghost:hover { color: var(--text); border-color: var(--text2); }
+
+    .form-actions { display: flex; gap: 10px; margin-top: 20px; }
+
+    .toast {
+      position: fixed; bottom: 24px; right: 24px;
+      background: var(--surface2); border: 1px solid var(--border); border-radius: 8px;
+      padding: 12px 20px; font-size: 13px; z-index: 9999;
+      transform: translateY(80px); opacity: 0; transition: all .3s;
+    }
+    .toast.show { transform: translateY(0); opacity: 1; }
+    .toast.success { border-color: rgba(76,175,80,0.5); color: #4caf50; }
+    .toast.error   { border-color: rgba(239,83,80,0.5);  color: #ef5350; }
+
+    /* scrollbar */
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: var(--surface2); border-radius: 3px; }
+  </style>
+</head>
+<body>
+
+<nav>
+  <div class="logo">✈ Contrail</div>
+  <div class="tabs">
+    <button class="tab active" data-tab="map">Map</button>
+    <button class="tab" data-tab="stats">Stats</button>
+    <button class="tab" data-tab="flights">Flights</button>
+    <button class="tab tab-add" data-tab="add">+ Add Flight</button>
+  </div>
+</nav>
+
+<main>
+
+  <!-- MAP -->
+  <div id="tab-map" class="tab-content active">
+    <div id="map"></div>
+  </div>
+
+  <!-- STATS -->
+  <div id="tab-stats" class="tab-content">
+    <div class="stats-page">
+      <div class="stat-cards">
+        <div class="stat-card">
+          <div class="label">Total Flights</div>
+          <div class="value" id="s-flights">—</div>
+        </div>
+        <div class="stat-card">
+          <div class="label">Distance</div>
+          <div class="value" id="s-distance">—</div>
+          <div class="sub" id="s-earth">—</div>
+        </div>
+        <div class="stat-card">
+          <div class="label">Time in Air</div>
+          <div class="value" id="s-hours">—</div>
+          <div class="sub" id="s-days">—</div>
+        </div>
+        <div class="stat-card">
+          <div class="label">Airports</div>
+          <div class="value" id="s-airports">—</div>
+        </div>
+        <div class="stat-card">
+          <div class="label">Countries</div>
+          <div class="value" id="s-countries">—</div>
+        </div>
+        <div class="stat-card">
+          <div class="label">Airlines</div>
+          <div class="value" id="s-airlines">—</div>
+        </div>
+      </div>
+
+      <div class="chart-section">
+        <h3>Flights per Year</h3>
+        <div class="chart-wrap">
+          <canvas id="yearChart"></canvas>
+        </div>
+      </div>
+
+      <div class="top-lists">
+        <div class="top-list">
+          <h3>Top Airlines</h3>
+          <div id="top-airlines"></div>
+        </div>
+        <div class="top-list">
+          <h3>Top Routes</h3>
+          <div id="top-routes"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- FLIGHTS -->
+  <div id="tab-flights" class="tab-content">
+    <div class="flights-page">
+      <div class="flights-header">
+        <h2>All Flights</h2>
+        <span class="flight-count" id="flights-count"></span>
+        <input type="text" class="search-box" id="search" placeholder="Search airline, airport, flight…">
+      </div>
+      <div class="table-wrap">
+        <table id="flights-table">
+          <thead>
+            <tr>
+              <th data-col="date">Date</th>
+              <th data-col="route">Route</th>
+              <th data-col="flight_number">Flight</th>
+              <th data-col="airline">Airline</th>
+              <th data-col="distance">Distance</th>
+              <th data-col="duration">Duration</th>
+              <th data-col="plane">Aircraft</th>
+            </tr>
+          </thead>
+          <tbody id="flights-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- ADD FLIGHT -->
+  <div id="tab-add" class="tab-content">
+    <div class="add-page">
+      <h2>Add Flight</h2>
+      <p class="subtitle">Enter a flight number and date to auto-fill details, or fill everything manually.</p>
+
+      <div class="form-step">
+        <h3>Step 1 — Lookup</h3>
+        <div class="form-row">
+          <div class="form-group" style="flex:1">
+            <label>Flight Number</label>
+            <input type="text" id="in-flight-number" placeholder="e.g. KL1234" autocomplete="off" spellcheck="false">
+          </div>
+          <div class="form-group" style="flex:1">
+            <label>Date</label>
+            <input type="date" id="in-date">
+          </div>
+        </div>
+        <div class="form-actions">
+          <button class="btn btn-primary" id="btn-lookup">Look Up Flight</button>
+          <button class="btn btn-ghost" id="btn-manual">Fill Manually</button>
+        </div>
+        <div class="lookup-status" id="lookup-status"></div>
+      </div>
+
+      <div class="form-step" id="flight-details" style="display:none">
+        <h3>Step 2 — Details</h3>
+        <div class="form-row">
+          <div class="form-group">
+            <label>From (IATA)</label>
+            <input type="text" id="in-from" placeholder="AMS" maxlength="3" autocomplete="off" spellcheck="false">
+          </div>
+          <div class="form-group">
+            <label>To (IATA)</label>
+            <input type="text" id="in-to" placeholder="JFK" maxlength="3" autocomplete="off" spellcheck="false">
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>Airline</label>
+            <input type="text" id="in-airline" placeholder="KLM Royal Dutch Airlines">
+          </div>
+          <div class="form-group" style="flex:0 0 120px">
+            <label>Aircraft</label>
+            <input type="text" id="in-plane" placeholder="Boeing 737">
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group" style="flex:0 0 130px">
+            <label>Distance (km)</label>
+            <input type="number" id="in-distance" placeholder="auto">
+          </div>
+          <div class="form-group" style="flex:0 0 110px">
+            <label>Duration (HH:MM)</label>
+            <input type="text" id="in-duration" placeholder="02:30" maxlength="5">
+          </div>
+        </div>
+        <div class="form-actions">
+          <button class="btn btn-primary" id="btn-save">Save Flight</button>
+          <button class="btn btn-ghost" id="btn-reset">Reset</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</main>
+
+<div class="toast" id="toast"></div>
+
+<script>
+'use strict';
+
+let allFlights  = [];
+let allAirports = {};
+let map, chartYear;
+let sortCol = 'date', sortDir = -1; // -1 = desc
+
+// --- Tabs ---
+
+document.querySelectorAll('.tab').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.tab').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById('tab-' + btn.dataset.tab).classList.add('active');
+    if (btn.dataset.tab === 'map' && map) setTimeout(() => map.invalidateSize(), 50);
+  });
+});
+
+// --- Toast ---
+
+function toast(msg, type = 'success') {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.className = `toast show ${type}`;
+  setTimeout(() => el.classList.remove('show'), 3000);
+}
+
+// --- Map ---
+
+function initMap() {
+  map = L.map('map', { center: [30, 15], zoom: 2, zoomControl: true });
+
+  L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+    maxZoom: 19
+  }).addTo(map);
+
+  drawRoutes();
+  drawAirports();
+}
+
+function greatCircle(lat1, lon1, lat2, lon2, n = 60) {
+  const toRad = x => x * Math.PI / 180;
+  const toDeg = x => x * 180 / Math.PI;
+  const φ1 = toRad(lat1), λ1 = toRad(lon1);
+  const φ2 = toRad(lat2), λ2 = toRad(lon2);
+  const d = Math.acos(Math.max(-1, Math.min(1,
+    Math.sin(φ1) * Math.sin(φ2) + Math.cos(φ1) * Math.cos(φ2) * Math.cos(λ2 - λ1)
+  )));
+  if (d < 1e-6) return [[lat1, lon1]];
+  const pts = [];
+  for (let i = 0; i <= n; i++) {
+    const f = i / n;
+    const A = Math.sin((1 - f) * d) / Math.sin(d);
+    const B = Math.sin(f * d) / Math.sin(d);
+    const x = A * Math.cos(φ1) * Math.cos(λ1) + B * Math.cos(φ2) * Math.cos(λ2);
+    const y = A * Math.cos(φ1) * Math.sin(λ1) + B * Math.cos(φ2) * Math.sin(λ2);
+    const z = A * Math.sin(φ1) + B * Math.sin(φ2);
+    pts.push([toDeg(Math.atan2(z, Math.sqrt(x * x + y * y))), toDeg(Math.atan2(y, x))]);
+  }
+  // Unwrap longitudes so lines don't jump across the antimeridian
+  for (let i = 1; i < pts.length; i++) {
+    while (pts[i][1] - pts[i-1][1] >  180) pts[i][1] -= 360;
+    while (pts[i][1] - pts[i-1][1] < -180) pts[i][1] += 360;
+  }
+  return pts;
+}
+
+function drawRoutes() {
+  const routeCount = {};
+  allFlights.forEach(f => {
+    if (!f.from || !f.to || !allAirports[f.from] || !allAirports[f.to]) return;
+    const key = [f.from, f.to].sort().join('|');
+    routeCount[key] = (routeCount[key] || 0) + 1;
+  });
+
+  const drawn = new Set();
+  allFlights.forEach(f => {
+    const a = allAirports[f.from], b = allAirports[f.to];
+    if (!a || !b) return;
+    const key = [f.from, f.to].sort().join('|');
+    if (drawn.has(key)) return;
+    drawn.add(key);
+    const count = routeCount[key] || 1;
+    const weight = Math.min(0.8 + Math.log2(count) * 0.4, 3);
+    L.polyline(greatCircle(a.lat, a.lon, b.lat, b.lon), {
+      color: '#4fc3f7', weight, opacity: 0.35, smoothFactor: 1
+    }).addTo(map);
+  });
+}
+
+function drawAirports() {
+  const visitCount = {};
+  allFlights.forEach(f => {
+    if (f.from) visitCount[f.from] = (visitCount[f.from] || 0) + 1;
+    if (f.to)   visitCount[f.to]   = (visitCount[f.to]   || 0) + 1;
+  });
+
+  Object.entries(allAirports).forEach(([iata, ap]) => {
+    if (isNaN(ap.lat) || isNaN(ap.lon)) return;
+    const count  = visitCount[iata] || 1;
+    const radius = Math.min(2 + Math.log2(count) * 1.2, 9);
+    L.circleMarker([ap.lat, ap.lon], {
+      radius, color: '#4fc3f7', fillColor: '#4fc3f7', fillOpacity: 0.8, weight: 0.5
+    }).bindTooltip(
+      `<b>${iata}</b> — ${ap.name}<br><small>${ap.city}, ${ap.country} &middot; ${count} visit${count !== 1 ? 's' : ''}</small>`,
+      { className: 'map-tooltip' }
+    ).addTo(map);
+  });
+}
+
+// --- Stats ---
+
+function renderStats() {
+  const totalKm  = allFlights.reduce((s, f) => s + (f.distance || 0), 0);
+  let   totalMin = 0;
+  allFlights.forEach(f => {
+    if (f.duration && /^\d+:\d+$/.test(f.duration)) {
+      const [h, m] = f.duration.split(':').map(Number);
+      totalMin += h * 60 + m;
+    }
+  });
+  const totalHrs  = Math.round(totalMin / 60);
+  const airports  = new Set(allFlights.flatMap(f => [f.from, f.to]).filter(Boolean));
+  const countries = new Set([...airports].map(iata => allAirports[iata]?.country).filter(Boolean));
+  const airlines  = new Set(allFlights.map(f => f.airline).filter(Boolean));
+
+  document.getElementById('s-flights').textContent   = allFlights.length.toLocaleString();
+  document.getElementById('s-distance').textContent  = totalKm >= 1e6
+    ? (totalKm / 1e6).toFixed(1) + 'M km'
+    : Math.round(totalKm / 1000).toLocaleString() + 'k km';
+  document.getElementById('s-earth').textContent     = `${(totalKm / 40075).toFixed(1)}× around Earth`;
+  document.getElementById('s-hours').textContent     = totalHrs.toLocaleString() + ' h';
+  document.getElementById('s-days').textContent      = `${Math.round(totalMin / 1440)} days`;
+  document.getElementById('s-airports').textContent  = airports.size;
+  document.getElementById('s-countries').textContent = countries.size;
+  document.getElementById('s-airlines').textContent  = airlines.size;
+
+  // Yearly chart
+  const byYear = {};
+  allFlights.forEach(f => {
+    const yr = f.date ? f.date.substring(0, 4) : null;
+    if (yr && /^\d{4}$/.test(yr)) byYear[yr] = (byYear[yr] || 0) + 1;
+  });
+  const years = Object.keys(byYear).sort();
+
+  if (chartYear) chartYear.destroy();
+  chartYear = new Chart(document.getElementById('yearChart').getContext('2d'), {
+    type: 'bar',
+    data: {
+      labels: years,
+      datasets: [{ data: years.map(y => byYear[y]), backgroundColor: 'rgba(79,195,247,0.55)', borderColor: '#4fc3f7', borderWidth: 1 }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { ticks: { color: '#8888aa', font: { size: 11 } }, grid: { color: 'rgba(255,255,255,0.04)' } },
+        y: { ticks: { color: '#8888aa', font: { size: 11 } }, grid: { color: 'rgba(255,255,255,0.04)' }, beginAtZero: true }
+      }
+    }
+  });
+
+  // Top airlines
+  const airlineCount = {};
+  allFlights.forEach(f => { if (f.airline) airlineCount[f.airline] = (airlineCount[f.airline] || 0) + 1; });
+  const topAirlines = Object.entries(airlineCount).sort((a, b) => b[1] - a[1]).slice(0, 8);
+  document.getElementById('top-airlines').innerHTML = topAirlines.map(([name, n], i) => `
+    <div class="top-list-row">
+      <span class="rank">${i + 1}</span>
+      <span class="name">${name}</span>
+      <span class="count">${n}</span>
+    </div>`).join('');
+
+  // Top routes
+  const routeCount = {};
+  allFlights.forEach(f => {
+    if (f.from && f.to) { const k = `${f.from} → ${f.to}`; routeCount[k] = (routeCount[k] || 0) + 1; }
+  });
+  const topRoutes = Object.entries(routeCount).sort((a, b) => b[1] - a[1]).slice(0, 8);
+  document.getElementById('top-routes').innerHTML = topRoutes.map(([name, n], i) => `
+    <div class="top-list-row">
+      <span class="rank">${i + 1}</span>
+      <span class="name">${name}</span>
+      <span class="count">${n}</span>
+    </div>`).join('');
+}
+
+// --- Flights table ---
+
+let filteredFlights = [];
+
+function renderTable(filter = '') {
+  const q = filter.toLowerCase();
+  filteredFlights = allFlights.filter(f =>
+    !q ||
+    (f.from         || '').toLowerCase().includes(q) ||
+    (f.to           || '').toLowerCase().includes(q) ||
+    (f.airline      || '').toLowerCase().includes(q) ||
+    (f.flight_number|| '').toLowerCase().includes(q) ||
+    (f.plane        || '').toLowerCase().includes(q)
+  );
+
+  filteredFlights.sort((a, b) => {
+    let va = a[sortCol] ?? '', vb = b[sortCol] ?? '';
+    if (sortCol === 'distance') { va = Number(va); vb = Number(vb); }
+    if (sortCol === 'route') { va = `${a.from}${a.to}`; vb = `${b.from}${b.to}`; }
+    if (va < vb) return -1 * sortDir;
+    if (va > vb) return  1 * sortDir;
+    return 0;
+  });
+
+  document.getElementById('flights-count').textContent =
+    filteredFlights.length === allFlights.length
+      ? `${allFlights.length} flights`
+      : `${filteredFlights.length} of ${allFlights.length} flights`;
+
+  document.getElementById('flights-tbody').innerHTML = filteredFlights.map(f => `
+    <tr>
+      <td class="dim">${(f.date || '').substring(0, 10)}</td>
+      <td>
+        <span class="airport-code">${f.from || '—'}</span>
+        <span class="arrow">→</span>
+        <span class="airport-code">${f.to || '—'}</span>
+      </td>
+      <td class="dim">${f.flight_number || '—'}</td>
+      <td>${f.airline || '—'}</td>
+      <td class="dim">${f.distance ? f.distance.toLocaleString() + ' km' : '—'}</td>
+      <td class="dim">${f.duration || '—'}</td>
+      <td class="dim">${f.plane || '—'}</td>
+    </tr>
+  `).join('');
+}
+
+document.querySelectorAll('#flights-table thead th').forEach(th => {
+  th.addEventListener('click', () => {
+    const col = th.dataset.col;
+    if (sortCol === col) { sortDir *= -1; }
+    else { sortCol = col; sortDir = 1; }
+    document.querySelectorAll('#flights-table thead th').forEach(t => t.classList.remove('sort-asc', 'sort-desc'));
+    th.classList.add(sortDir === 1 ? 'sort-asc' : 'sort-desc');
+    renderTable(document.getElementById('search').value);
+  });
+});
+
+document.getElementById('search').addEventListener('input', e => renderTable(e.target.value));
+
+// --- Add flight form ---
+
+document.getElementById('btn-lookup').addEventListener('click', async () => {
+  const flightNum = document.getElementById('in-flight-number').value.trim();
+  const date      = document.getElementById('in-date').value;
+  const statusEl  = document.getElementById('lookup-status');
+
+  if (!flightNum || !date) { statusEl.textContent = 'Please enter a flight number and date.'; statusEl.className = 'lookup-status error'; return; }
+
+  statusEl.textContent = 'Looking up flight…';
+  statusEl.className   = 'lookup-status';
+  document.getElementById('btn-lookup').disabled = true;
+
+  try {
+    const res  = await fetch('/api/flights/lookup', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ flight_number: flightNum, date })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Not found');
+
+    document.getElementById('in-from').value     = data.from     || '';
+    document.getElementById('in-to').value       = data.to       || '';
+    document.getElementById('in-airline').value  = data.airline  || '';
+    document.getElementById('in-plane').value    = data.plane    || '';
+    document.getElementById('in-distance').value = data.distance || '';
+    document.getElementById('in-duration').value = data.duration || '';
+
+    statusEl.textContent = `Found: ${data.from} → ${data.to} (${data.airline || 'unknown airline'})`;
+    statusEl.className   = 'lookup-status success';
+    document.getElementById('flight-details').style.display = 'block';
+  } catch (e) {
+    statusEl.textContent = `Not found — ${e.message}. Fill in the details below.`;
+    statusEl.className   = 'lookup-status error';
+    document.getElementById('flight-details').style.display = 'block';
+  } finally {
+    document.getElementById('btn-lookup').disabled = false;
+  }
+});
+
+document.getElementById('btn-manual').addEventListener('click', () => {
+  document.getElementById('lookup-status').textContent = '';
+  document.getElementById('flight-details').style.display = 'block';
+});
+
+document.getElementById('btn-reset').addEventListener('click', resetForm);
+
+function resetForm() {
+  ['in-flight-number','in-date','in-from','in-to','in-airline','in-plane','in-distance','in-duration'].forEach(id => {
+    document.getElementById(id).value = '';
+  });
+  document.getElementById('lookup-status').textContent = '';
+  document.getElementById('lookup-status').className   = 'lookup-status';
+  document.getElementById('flight-details').style.display = 'none';
+}
+
+document.getElementById('btn-save').addEventListener('click', async () => {
+  const from = document.getElementById('in-from').value.trim().toUpperCase();
+  const to   = document.getElementById('in-to').value.trim().toUpperCase();
+  const date = document.getElementById('in-date').value;
+
+  if (!from || !to || !date) {
+    toast('From, To, and Date are required.', 'error');
+    return;
+  }
+
+  const flight = {
+    date,
+    from,
+    to,
+    flight_number: document.getElementById('in-flight-number').value.trim().toUpperCase(),
+    airline:       document.getElementById('in-airline').value.trim(),
+    plane:         document.getElementById('in-plane').value.trim(),
+    distance:      parseInt(document.getElementById('in-distance').value) || 0,
+    duration:      document.getElementById('in-duration').value.trim(),
+    seat: '', seat_type: '', class: '', reason: '', registration: '', trip: '', note: ''
+  };
+
+  try {
+    const res  = await fetch('/api/flights', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(flight)
+    });
+    const saved = await res.json();
+    if (!res.ok) throw new Error(saved.error || 'Save failed');
+
+    allFlights.unshift(saved);
+    renderStats();
+    renderTable(document.getElementById('search').value);
+    resetForm();
+    toast(`Saved: ${saved.from} → ${saved.to}`, 'success');
+  } catch (e) {
+    toast(e.message, 'error');
+  }
+});
+
+// --- Init ---
+
+async function init() {
+  [allFlights, allAirports] = await Promise.all([
+    fetch('/api/flights').then(r => r.json()),
+    fetch('/api/airports').then(r => r.json())
+  ]);
+
+  initMap();
+  renderStats();
+  renderTable();
+
+  // Default table sort header indicator
+  document.querySelector('#flights-table th[data-col="date"]').classList.add('sort-desc');
+}
+
+init().catch(console.error);
+</script>
+
+</body>
+</html>

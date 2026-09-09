@@ -1,0 +1,12 @@
+{
+  "name": "contrail",
+  "version": "1.0.0",
+  "description": "Personal flight tracker — localhost replacement for openflights.org",
+  "main": "app.js",
+  "scripts": {
+    "start": "node app.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2"
+  }
+}
