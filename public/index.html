@@ -33,7 +33,7 @@
       --surface:   #ffffff;
       --surface2:  #e8ecf2;
       --border:    rgba(0,50,120,0.1);
-      --accent:    #0277bd;
+      --accent:    #c0392b;
       --accent2:   #5c35cc;
       --text:      #1a1a2e;
       --text2:     #556688;
@@ -57,8 +57,8 @@
       padding: 6px 14px; border-radius: 6px; font-size: 13px; font-weight: 500; transition: all .15s;
     }
     .tab:hover { color: var(--text); background: var(--surface2); }
-    .tab.active { color: var(--accent); background: rgba(79,195,247,0.1); }
-    .tab-add { color: var(--accent) !important; border: 1px solid rgba(79,195,247,0.3) !important; margin-left: 8px; }
+    .tab.active { color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent); }
+    .tab-add { color: var(--accent) !important; border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent) !important; margin-left: 8px; }
     .tab-add:hover { background: rgba(79,195,247,0.15) !important; }
     .tab-tripit { color: #a78bfa !important; border: 1px solid rgba(167,139,250,0.3) !important; font-size: 12px !important; }
     .tab-tripit:hover { background: rgba(167,139,250,0.12) !important; }
@@ -120,7 +120,7 @@
     .popup-flights-btn {
       margin-top: 10px; display: inline-block; padding: 6px 12px;
       background: rgba(79,195,247,0.15); border: 1px solid rgba(79,195,247,0.4);
-      border-radius: 5px; color: #4fc3f7; font-size: 12px; font-weight: 600;
+      border-radius: 5px; color: var(--accent); font-size: 12px; font-weight: 600;
       cursor: pointer; text-decoration: none; transition: background .15s;
     }
     .popup-flights-btn:hover { background: rgba(79,195,247,0.28); }
@@ -431,6 +431,7 @@ function applyTheme(theme) {
   document.documentElement.dataset.theme = theme;
   document.getElementById('theme-toggle').textContent = theme === 'dark' ? '☀️' : '🌙';
   if (document.getElementById('tab-stats').classList.contains('active')) renderStats();
+  if (typeof drawAirports === 'function' && airportLayer) { drawRoutes(); drawAirports(); }
 }
 
 function toggleTheme() {
@@ -438,6 +439,9 @@ function toggleTheme() {
   localStorage.setItem('theme', next);
   applyTheme(next);
 }
+
+let airportLayer = null;
+let clusterMode  = false;
 
 applyTheme(localStorage.getItem('theme') || 'dark');
 
@@ -603,13 +607,10 @@ function drawRoutes() {
     const count = routeCount[key] || 1;
     const weight = Math.min(0.8 + Math.log2(count) * 0.4, 3);
     L.polyline(greatCircle(a.lat, a.lon, b.lat, b.lon), {
-      color: '#4fc3f7', weight, opacity: 0.35, smoothFactor: 1
+      color: getCSSVar('--accent'), weight, opacity: 0.35, smoothFactor: 1
     }).addTo(map);
   });
 }
-
-let airportLayer = null;
-let clusterMode  = false;
 
 function drawAirports() {
   if (airportLayer) map.removeLayer(airportLayer);
@@ -634,7 +635,7 @@ function drawAirports() {
         const n = cluster.getChildCount();
         const size = n < 10 ? 32 : n < 50 ? 38 : 44;
         return L.divIcon({
-          html: `<div style="width:${size}px;height:${size}px;border-radius:50%;background:rgba(13,13,26,0.85);border:1.5px solid #4fc3f7;display:flex;align-items:center;justify-content:center;color:#4fc3f7;font-size:11px;font-weight:700">${n}</div>`,
+          html: `<div style="width:${size}px;height:${size}px;border-radius:50%;background:var(--surface);border:1.5px solid var(--accent);display:flex;align-items:center;justify-content:center;color:var(--accent);font-size:11px;font-weight:700">${n}</div>`,
           className: '', iconSize: [size, size], iconAnchor: [size/2, size/2]
         });
       }
@@ -643,7 +644,7 @@ function drawAirports() {
       if (isNaN(ap.lat) || isNaN(ap.lon)) return;
       const count = visitCount[iata] || 1;
       const radius = Math.min(2 + Math.log2(count) * 1.2, 9);
-      airportLayer.addLayer(L.circleMarker([ap.lat, ap.lon], { radius, color: '#4fc3f7', fillColor: '#4fc3f7', fillOpacity: 0.8, weight: 0.5 }).bindPopup(makePopup(iata, ap, count), { maxWidth: 240 }));
+      airportLayer.addLayer(L.circleMarker([ap.lat, ap.lon], { radius, color: getCSSVar('--accent'), fillColor: getCSSVar('--accent'), fillOpacity: 0.8, weight: 0.5 }).bindPopup(makePopup(iata, ap, count), { maxWidth: 240 }));
     });
   } else {
     airportLayer = L.layerGroup();
@@ -651,7 +652,7 @@ function drawAirports() {
       if (isNaN(ap.lat) || isNaN(ap.lon)) return;
       const count = visitCount[iata] || 1;
       const radius = Math.min(2 + Math.log2(count) * 1.2, 9);
-      airportLayer.addLayer(L.circleMarker([ap.lat, ap.lon], { radius, color: '#4fc3f7', fillColor: '#4fc3f7', fillOpacity: 0.8, weight: 0.5 }).bindPopup(makePopup(iata, ap, count), { maxWidth: 240 }));
+      airportLayer.addLayer(L.circleMarker([ap.lat, ap.lon], { radius, color: getCSSVar('--accent'), fillColor: getCSSVar('--accent'), fillOpacity: 0.8, weight: 0.5 }).bindPopup(makePopup(iata, ap, count), { maxWidth: 240 }));
     });
   }
   map.addLayer(airportLayer);
