@@ -12,6 +12,8 @@ Data is stored locally in `data/flights.json`. MongoDB support can be added late
 
 ![Map](docs/map-screenshot.jpg)
 
+![Map (clustered)](docs/map-screenshot-clustered.jpg)
+
 ## Setup
 
 Tested with Node.js 18+.
