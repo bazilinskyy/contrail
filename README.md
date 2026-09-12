@@ -7,12 +7,13 @@ Features:
 - **Stats dashboard** — total distance, flight hours, airports, countries, airlines, top routes, and a flights-per-year chart
 - **Full flight list** with search and sortable columns
 - **Add a flight by flight number + date** — the app looks up departure/arrival airports, airline, aircraft, and duration automatically via AeroDataBox
+- **Light and dark mode** — toggled via the nav bar; dark is the default
 
 Data is stored locally in `data/flights.json`. MongoDB support can be added later.
 
-![Map](docs/map-screenshot.jpg)
+![Map — light mode, individual markers](docs/map-screenshot.jpg)
 
-![Map (clustered)](docs/map-screenshot-clustered.jpg)
+![Map — dark mode, clustered markers](docs/map-screenshot-clustered.jpg)
 
 ## Setup
 
